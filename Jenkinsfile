@@ -1,115 +1,97 @@
 pipeline {
     agent { label 'Test_node' }
-    tools {
-        jdk 'Java17'
-        maven 'Maven3'
-    }
+
     environment {
-	    APP_NAME = "register-app-pipeline"
-            RELEASE = "1.0.0"
-            DOCKER_USER = "ashfaque9x"
-            DOCKER_PASS = 'dockerhub'
-            IMAGE_NAME = "${DOCKER_USER}" + "/" + "${APP_NAME}"
-            IMAGE_TAG = "${RELEASE}-${BUILD_NUMBER}"
-	    JENKINS_API_TOKEN = credentials("JENKINS_API_TOKEN")
+        GIT_REPO_URL = 'https://github.com/VASANTHAPUVVADA/real-time-SCM.git'
+        MAVEN_HOME = tool name: 'Maven 3', type: 'ToolLocation' // Ensure Maven is installed in Jenkins
+        SONARQUBE = 'SonarQube' // Set your SonarQube server in Jenkins configuration
+        NEXUS_REPO = 'http://your-nexus-repo/repository/maven-releases/' // Nexus Repository URL
+        DOCKER_IMAGE_NAME = 'your-image-name'
+        DOCKER_REGISTRY = 'your-docker-registry-url'
+        EKS_CLUSTER_NAME = 'your-eks-cluster'
+        ARGOCD_APP_NAME = 'your-argocd-app'
+        EMAIL_RECIPIENT = 'vasanthapuvvada2000@gmail.com' // Change to the desired recipient
     }
-    stages{
-        stage("Cleanup Workspace"){
-                steps {
-                cleanWs()
-                }
-        }
 
-        stage("Checkout from SCM"){
-                steps {
-                    git branch: 'main', credentialsId: 'vasanthapuvvada', url: 'https://github.com/VASANTHAPUVVADA/real-time-SCM.git'
-                }
-        }
-
-        stage("Build Application"){
+    stages {
+        stage('Clone Repository') {
             steps {
-                sh "mvn clean package"
+                // Clone the Git repository
+                git url: "${GIT_REPO_URL}", branch: 'main'
             }
-
-       }
-
-       stage("Test Application"){
-           steps {
-                 sh "mvn test"
-           }
-       }
-
-       stage("SonarQube Analysis"){
-           steps {
-	           script {
-		        withSonarQubeEnv(credentialsId: 'jenkins-sonarqube-token') { 
-                        sh "mvn sonar:sonar"
-		        }
-	           }	
-           }
-       }
-
-       stage("Quality Gate"){
-           steps {
-               script {
-                    waitForQualityGate abortPipeline: false, credentialsId: 'jenkins-sonarqube-token'
-                }	
-            }
-
         }
 
-        stage("Build & Push Docker Image") {
+        stage('Build with Maven') {
             steps {
+                // Use Maven to build the project and create the artifact
                 script {
-                    docker.withRegistry('',DOCKER_PASS) {
-                        docker_image = docker.build "${IMAGE_NAME}"
-                    }
+                    sh "'${MAVEN_HOME}/bin/mvn' clean install -DskipTests"
+                }
+            }
+        }
 
-                    docker.withRegistry('',DOCKER_PASS) {
-                        docker_image.push("${IMAGE_TAG}")
-                        docker_image.push('latest')
+        stage('SonarQube Analysis') {
+            steps {
+                // Perform SonarQube analysis
+                script {
+                    withSonarQubeEnv(SONARQUBE) {
+                        sh "'${MAVEN_HOME}/bin/mvn' sonar:sonar"
                     }
                 }
             }
+        }
 
-       }
-
-       stage("Trivy Scan") {
-           steps {
-               script {
-	            sh ('docker run -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image ashfaque9x/register-app-pipeline:latest --no-progress --scanners vuln  --exit-code 0 --severity HIGH,CRITICAL --format table')
-               }
-           }
-       }
-
-       stage ('Cleanup Artifacts') {
-           steps {
-               script {
-                    sh "docker rmi ${IMAGE_NAME}:${IMAGE_TAG}"
-                    sh "docker rmi ${IMAGE_NAME}:latest"
-               }
-          }
-       }
-
-       stage("Trigger CD Pipeline") {
+        stage('Upload Artifact to Nexus') {
             steps {
+                // Upload the artifact to Nexus repository
                 script {
-                    sh "curl -v -k --user clouduser:${JENKINS_API_TOKEN} -X POST -H 'cache-control: no-cache' -H 'content-type: application/x-www-form-urlencoded' --data 'IMAGE_TAG=${IMAGE_TAG}' 'ec2-13-232-128-192.ap-south-1.compute.amazonaws.com:8080/job/gitops-register-app-cd/buildWithParameters?token=gitops-token'"
+                    sh "'${MAVEN_HOME}/bin/mvn' deploy -DaltDeploymentRepository=nexus::default::${NEXUS_REPO}"
                 }
             }
-       }
+        }
+
+        stage('Containerize the Artifact') {
+            steps {
+                // Build Docker image for the artifact
+                script {
+                    sh 'docker build -t ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:${BUILD_NUMBER} .'
+                    sh 'docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE_NAME}:${BUILD_NUMBER}'
+                }
+            }
+        }
+
+        stage('Deploy to EKS using ArgoCD') {
+            steps {
+                // Deploy the artifact to EKS via ArgoCD
+                script {
+                    // Assuming ArgoCD CLI is set up and the Kubernetes context is configured
+                    sh 'kubectl config use-context ${EKS_CLUSTER_NAME}'
+                    sh 'argocd app sync ${ARGOCD_APP_NAME}'
+                    sh 'argocd app wait ${ARGOCD_APP_NAME} --sync'
+                }
+            }
+        }
+
     }
 
     post {
-       failure {
-             emailext body: '''${SCRIPT, template="groovy-html.template"}''', 
-                      subject: "${env.JOB_NAME} - Build # ${env.BUILD_NUMBER} - Failed", 
-                      mimeType: 'text/html',to: "vasanthapuvvada2000@gmail.com"
-      }
-      success {
-            emailext body: '''${SCRIPT, template="groovy-html.template"}''', 
-                     subject: "${env.JOB_NAME} - Build # ${env.BUILD_NUMBER} - Successful", 
-                     mimeType: 'text/html',to: "vasanthapuvvada2000@gmail.com"
-      }      
-   }
+        success {
+            // Send success email notification
+            mail to: "${EMAIL_RECIPIENT}",
+                 subject: "Jenkins Pipeline Successful - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                 body: "The pipeline has successfully completed the process."
+        }
+
+        failure {
+            // Send failure email notification
+            mail to: "${EMAIL_RECIPIENT}",
+                 subject: "Jenkins Pipeline Failed - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                 body: "The pipeline has failed. Please check the logs for details."
+        }
+
+        always {
+            // Archive the build artifacts
+            archiveArtifacts artifacts: '**/target/*.jar', allowEmptyArchive: true
+        }
+    }
 }
