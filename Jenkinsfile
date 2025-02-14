@@ -22,7 +22,7 @@ pipeline {
 
         stage("Checkout from SCM"){
                 steps {
-                    git branch: 'main', credentialsId: 'github', url: 'https://github.com/VASANTHAPUVVADA/real-time-SCM.git'
+                    git branch: 'main', credentialsId: 'vasanthapuvvada', url: 'https://github.com/VASANTHAPUVVADA/real-time-SCM.git'
                 }
         }
 
