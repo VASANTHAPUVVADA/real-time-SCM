@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         GIT_REPO_URL = 'https://github.com/VASANTHAPUVVADA/real-time-SCM.git'
-        MAVEN_HOME = tool name: 'Maven 3', type: 'ToolLocation' // Ensure Maven is installed in Jenkins
+        MAVEN_HOME = tool name: 'Maven3', type: 'ToolLocation' // Ensure Maven is installed in Jenkins
         SONARQUBE = 'SonarQube' // Set your SonarQube server in Jenkins configuration
         NEXUS_REPO = 'http://your-nexus-repo/repository/maven-releases/' // Nexus Repository URL
         DOCKER_IMAGE_NAME = 'your-image-name'
